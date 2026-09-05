@@ -1,11 +1,13 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const path = require('path');
 
 let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200, height: 800, minWidth: 600, minHeight: 500,
+    icon: path.join(__dirname, 'icon.ico'),
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#020617', symbolColor: '#94a3b8' },
     backgroundColor: '#020617',

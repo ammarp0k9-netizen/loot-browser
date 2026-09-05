@@ -19,7 +19,8 @@
       }
     ],
     "win": {
-      "target": ["nsis"]
+      "target": ["nsis"],
+      "icon": "icon.ico"
     },
     "directories": {
       "output": "dist"
