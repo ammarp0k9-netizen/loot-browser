@@ -1,0 +1,240 @@
+:root {
+  /* Core Tokens */
+  --main-bg: #020617;
+  --card-bg: #0f172a;
+  --surface-bg: #1e293b;
+  --accent: #3b82f6;
+  --accent2: #6366f1;
+  --text-white: #f8fafc;
+  --text-gray: #94a3b8;
+  --danger: #ef4444;
+  --success: #10b981;
+  --star: #f59e0b;
+  --border: #1e293b;
+
+  /* Interactive Tokens */
+  --hover-bg: rgba(59,130,246,0.1);
+  --active-nav-bg: rgba(59,130,246,0.12);
+  --focus-ring: rgba(99,102,241,0.2);
+  --track-bg: rgba(255,255,255,0.06);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: var(--main-bg);
+  color: var(--text-white);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Browser Chrome (Top UI) */
+#browser-chrome {
+  background-color: var(--main-bg);
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag; /* يسمح بسحب النافذة من أي مكان فارغ */
+}
+
+/* Tabs Area */
+#tabs-container {
+  display: flex;
+  align-items: flex-end;
+  height: 40px;
+  padding: 0 80px 0 10px; /* ترك مساحة لأزرار النظام */
+  gap: 4px;
+}
+
+.tab {
+  -webkit-app-region: no-drag;
+  background-color: transparent;
+  color: var(--text-gray);
+  padding: 8px 14px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px 6px 0 0;
+  min-width: 120px;
+  max-width: 220px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  position: relative;
+}
+
+.tab:hover {
+  background-color: var(--hover-bg);
+}
+
+.tab.active {
+  background-color: var(--card-bg);
+  color: var(--text-white);
+  border-top: 2px solid var(--accent);
+}
+
+.tab-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-grow: 1;
+}
+
+.tab-close {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.tab:hover .tab-close, .tab.active .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background-color: rgba(239,68,68,0.15); /* danger-soft */
+  color: var(--danger);
+}
+
+.new-tab-btn {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: none;
+  color: var(--text-gray);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  margin-left: 4px;
+  margin-bottom: 2px;
+}
+
+.new-tab-btn:hover {
+  background-color: var(--track-bg);
+}
+
+/* Navigation & Address Bar Area */
+#nav-area {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--card-bg);
+  gap: 12px;
+}
+
+.nav-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-white);
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.nav-btn:hover {
+  background-color: var(--surface-bg);
+}
+
+.nav-btn:active {
+  background-color: var(--active-nav-bg);
+}
+
+.nav-btn:disabled {
+  color: var(--border);
+  cursor: default;
+  background: transparent;
+}
+
+/* Address Bar */
+#address-bar-container {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  background-color: var(--surface-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  height: 36px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#address-bar-container:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+#url-input {
+  background: transparent;
+  border: none;
+  color: var(--text-white);
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+  font-family: inherit;
+}
+
+/* Main Content (Webviews) */
+#views-container {
+  flex-grow: 1;
+  position: relative;
+  background-color: var(--main-bg);
+}
+
+webview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  visibility: hidden;
+}
+
+webview.active {
+  visibility: visible;
+}
+
+/* Performance System - Future Proofing */
+body.perf-low .tab { transition: none; }
+body.perf-low #address-bar-container { transition: none; }
+
+/*Notification style*/
+#update-banner {
+  background-color: var(--card-bg);
+  border-bottom: 1px solid var(--accent);
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-white);
+  -webkit-app-region: no-drag;
+}
+#update-banner.hidden { display: none; }
+.update-info { display: flex; align-items: center; gap: 12px; }
+#update-progress-bar { width: 120px; height: 4px; background: var(--surface-bg); border-radius: 2px; overflow: hidden; }
+#update-progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.2s; }
+#btn-restart { background: var(--accent); color: var(--text-white); border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; }
+#btn-restart:hover { background: var(--accent2); }
+#btn-restart.hidden { display: none; }

@@ -1,0 +1,35 @@
+{
+  "name": "loot-browser",
+  "version": "1.0.0",
+  "description": "LootLingua Desktop Browser",
+  "author": "LootBrowser Team",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.loot.browser",
+    "productName": "LootBrowser",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ammarp0k9-netizen",
+        "repo": "loot-browser"
+      }
+    ],
+    "win": {
+      "target": ["nsis"]
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "6.3.9"
+  },
+  "devDependencies": {
+    "electron": "31.0.0",
+    "electron-builder": "24.13.3"
+  }
+}
