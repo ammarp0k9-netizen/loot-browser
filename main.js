@@ -46,5 +46,44 @@ ipcMain.on('context-menu-action', (event, { guestId, action }) => { const guest 
 ipcMain.on('download-cancel', (event, id) => activeDownloads.get(id)?.cancel());
 ipcMain.handle('download-action', (event, info) => info.action === 'folder' ? shell.showItemInFolder(info.path) : shell.openPath(info.path));
 ipcMain.on('toggle-fullscreen', () => mainWindow.setFullScreen(!mainWindow.isFullScreen())); ipcMain.on('restart-and-install', () => autoUpdater.quitAndInstall());
-app.whenReady().then(() => { configureSession(); createWindow(); autoUpdater.checkForUpdatesAndNotify(); autoUpdater.on('update-available', () => send('update-status', { type: 'available' })); autoUpdater.on('download-progress', p => send('update-status', { type: 'progress', percent: Math.round(p.percent) })); autoUpdater.on('update-downloaded', () => send('update-status', { type: 'downloaded' })); app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); }); });
+app.whenReady().then(() => {
+  configureSession();
+  createWindow();
+
+  autoUpdater.logger = require('electron-log');
+  autoUpdater.logger.transports.file.level = 'info';
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for update...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info.version);
+    send('update-status', { type: 'available', version: info.version });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('No update available. Current:', app.getVersion());
+    console.log('Latest:', info?.version);
+  });
+
+  autoUpdater.on('error', (error) => {
+    console.error('AUTO UPDATE ERROR:', error);
+    send('update-status', { type: 'error', message: error.message });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    console.log(`Download: ${Math.round(progress.percent)}%`);
+    send('update-status', {
+      type: 'progress',
+      percent: Math.round(progress.percent)
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded:', info.version);
+    send('update-status', { type: 'downloaded' });
+  });
+
+  autoUpdater.checkForUpdatesAndNotify(); autoUpdater.on('update-available', () => send('update-status', { type: 'available' })); autoUpdater.on('download-progress', p => send('update-status', { type: 'progress', percent: Math.round(p.percent) })); autoUpdater.on('update-downloaded', () => send('update-status', { type: 'downloaded' })); app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); }); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
