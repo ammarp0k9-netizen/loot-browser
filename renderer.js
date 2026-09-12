@@ -1,186 +1,53 @@
-const tabsContainer = document.getElementById('tabs-container');
-const newTabBtn = document.getElementById('btn-new-tab');
-const viewsContainer = document.getElementById('views-container');
-const urlInput = document.getElementById('url-input');
-const btnBack = document.getElementById('btn-back');
-const btnForward = document.getElementById('btn-forward');
-const btnReload = document.getElementById('btn-reload');
-
-let tabs = [];
-let activeTabId = null;
-let tabCounter = 0;
-
-const DEFAULT_URL = 'https://www.google.com';
-
-function createTab(url = DEFAULT_URL) {
-  const id = `tab-${tabCounter++}`;
-  
-  // 1. Create Tab UI Element
-  const tabEl = document.createElement('div');
-  tabEl.className = 'tab';
-  tabEl.id = id;
-  tabEl.innerHTML = `
-    <span class="tab-title">New Tab</span>
-    <div class="tab-close">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-    </div>
-  `;
-
-  // 2. Create Webview (Chromium Instance)
-  const viewEl = document.createElement('webview');
-  viewEl.setAttribute('src', url);
-  viewEl.id = `view-${id}`;
-  
-  // 3. Setup Listeners for the Webview
-  viewEl.addEventListener('page-title-updated', (e) => {
-    tabEl.querySelector('.tab-title').textContent = e.title;
-  });
-
-  viewEl.addEventListener('did-navigate', (e) => {
-    if (activeTabId === id) {
-      urlInput.value = e.url;
-      updateNavButtons(viewEl);
-    }
-  });
-
-  viewEl.addEventListener('did-navigate-in-page', (e) => {
-    if (activeTabId === id) {
-      urlInput.value = e.url;
-      updateNavButtons(viewEl);
-    }
-  });
-
-  // 4. Tab interactions
-  tabEl.addEventListener('click', () => switchTab(id));
-  tabEl.querySelector('.tab-close').addEventListener('click', (e) => {
-    e.stopPropagation();
-    closeTab(id);
-  });
-
-  tabsContainer.insertBefore(tabEl, newTabBtn);
-  viewsContainer.appendChild(viewEl);
-
-  tabs.push({ id, tabEl, viewEl });
-  switchTab(id);
+const { ipcRenderer, clipboard } = require('electron');
+const $ = id => document.getElementById(id);
+const NEW_TAB = new URL('newtab.html', location.href).href, SESSION = 'lootbrowser.session.v2';
+let tabs = [], activeId = null, counter = 0, closed = [], downloads = [], pendingPermission = null, menuGuestId = null;
+const active = () => tabs.find(t => t.id === activeId), byId = id => tabs.find(t => t.id === id);
+const inputToUrl = input => { const value = input.trim(); if (!value) return NEW_TAB; return /^(https?:\/\/|file:\/\/|localhost(?::\d+)?(?:\/|$)|[\w-]+(?:\.[\w-]+)+(?:[:/]|$))/i.test(value) ? (/^[a-z]+:\/\//i.test(value) ? value : `https://${value}`) : `https://www.google.com/search?q=${encodeURIComponent(value)}`; };
+const saveSession = () => localStorage.setItem(SESSION, JSON.stringify({ tabs: tabs.map(t => ({ url: t.url || NEW_TAB, title: t.title })), active: tabs.findIndex(t => t.id === activeId) }));
+function setMeta(tab, title, url, favicon) { tab.title = title || 'New Tab'; tab.el.querySelector('.tab-title').textContent = tab.title; const img = tab.el.querySelector('.tab-icon'), fallback = tab.el.querySelector('.tab-fallback'); if (favicon) { img.src = favicon; img.classList.remove('hidden'); fallback.classList.add('hidden'); } else { img.classList.add('hidden'); fallback.classList.remove('hidden'); } }
+function syncLocation(tab, url) { if (!url || url === 'about:blank') return; tab.url = url; if (activeId === tab.id) { $('url-input').value = url === NEW_TAB ? '' : url; updateNav(); } saveSession(); }
+function createTab(url = NEW_TAB, meta = {}) {
+  const id = `tab-${counter++}`, el = document.createElement('div'), view = document.createElement('webview');
+  el.className = 'tab'; el.draggable = true; el.dataset.id = id; el.innerHTML = '<span class="tab-fallback">o</span><img class="tab-icon hidden" alt=""><span class="tab-title"></span><button class="tab-close" title="Close tab">x</button>';
+  view.id = `view-${id}`; view.src = url; view.partition = 'persist:lootbrowser'; view.setAttribute('preload', new URL('guest-preload.js', location.href).href); view.setAttribute('allowpopups', ''); view.setAttribute('webpreferences', 'contextIsolation=yes,nodeIntegration=no');
+  const tab = { id, el, view, url, title: meta.title || (url === NEW_TAB ? 'New Tab' : 'Loading'), zoom: 1 }; setMeta(tab, tab.title, url);
+  view.addEventListener('dom-ready', () => { view.setZoomFactor(tab.zoom); syncLocation(tab, view.getURL()); });
+  view.addEventListener('page-title-updated', e => { setMeta(tab, e.title, tab.url); saveSession(); });
+  view.addEventListener('page-favicon-updated', e => setMeta(tab, tab.title, tab.url, e.favicons?.[0]));
+  for (const name of ['did-navigate', 'did-navigate-in-page', 'did-redirect-navigation']) view.addEventListener(name, e => { syncLocation(tab, e.url); hideError(tab); });
+  view.addEventListener('did-start-loading', () => hideError(tab));
+  view.addEventListener('did-stop-loading', () => { syncLocation(tab, view.getURL()); hideError(tab); });
+  view.addEventListener('did-fail-load', e => { if (e.isMainFrame && e.errorCode !== -3 && /^https?:/i.test(e.validatedURL || tab.url)) showError(tab, e.validatedURL || tab.url); });
+  view.addEventListener('found-in-page', e => { if (activeId === id) $('find-count').textContent = e.result.matches ? `${e.result.activeMatchOrdinal}/${e.result.matches}` : 'No matches'; });
+  view.addEventListener('ipc-message', e => { if (e.channel === 'guest-pointer') hideFloating(); });
+  el.onclick = e => { if (!e.target.closest('.tab-close')) switchTab(id); }; el.querySelector('.tab-close').onclick = e => { e.stopPropagation(); closeTab(id); };
+  el.ondragstart = e => e.dataTransfer.setData('text/plain', id); el.ondragover = e => e.preventDefault(); el.ondrop = e => { e.preventDefault(); reorder(e.dataTransfer.getData('text/plain'), id); };
+  $('tabs-container').insertBefore(el, $('btn-new-tab')); $('views-container').appendChild(view); tabs.push(tab); switchTab(id); saveSession(); return tab;
 }
-
-function switchTab(id) {
-  activeTabId = id;
-  tabs.forEach(tab => {
-    if (tab.id === id) {
-      tab.tabEl.classList.add('active');
-      tab.viewEl.classList.add('active');
-      urlInput.value = tab.viewEl.getURL() || '';
-      updateNavButtons(tab.viewEl);
-    } else {
-      tab.tabEl.classList.remove('active');
-      tab.viewEl.classList.remove('active');
-    }
-  });
+function switchTab(id) { const tab = byId(id); if (!tab) return; activeId = id; tabs.forEach(t => { const on = t.id === id; t.el.classList.toggle('active', on); t.view.classList.toggle('active', on); t.error?.classList.toggle('active', on); }); $('url-input').value = tab.url === NEW_TAB ? '' : tab.url; updateNav(); saveSession(); }
+function closeTab(id) { const index = tabs.findIndex(t => t.id === id), tab = tabs[index]; if (!tab) return; closed.push({ url: tab.url, title: tab.title }); if (closed.length > 15) closed.shift(); tab.el.remove(); tab.view.remove(); tab.error?.remove(); tabs.splice(index, 1); if (!tabs.length) createTab(); else if (activeId === id) switchTab(tabs[Math.max(0, index - 1)].id); saveSession(); }
+function reorder(fromId, toId) { if (!fromId || fromId === toId) return; const from = byId(fromId), target = byId(toId), old = tabs.indexOf(from), index = tabs.indexOf(target); tabs.splice(old, 1); tabs.splice(index, 0, from); $('tabs-container').insertBefore(from.el, target.el); saveSession(); }
+function updateNav() { const v = active()?.view; try { $('btn-back').disabled = !v?.canGoBack(); $('btn-forward').disabled = !v?.canGoForward(); } catch {} }
+function navigate(value) { const tab = active(); if (tab) { hideError(tab); tab.view.loadURL(inputToUrl(value)); } }
+function showError(tab, url) { tab.failedUrl = url; if (!tab.error) { const box = document.createElement('section'); box.className = 'page-error'; box.innerHTML = '<div><span class="error-glyph">!</span><h1>Could not reach this page</h1><p>Check your connection or try again.</p><p><button data-retry>Try again</button><button data-back class="quiet">Go back</button></p></div>'; box.querySelector('[data-retry]').onclick = () => { hideError(tab); tab.view.loadURL(tab.failedUrl); }; box.querySelector('[data-back]').onclick = () => { hideError(tab); if (tab.view.canGoBack()) tab.view.goBack(); }; $('views-container').appendChild(box); tab.error = box; } tab.error.classList.toggle('active', tab.id === activeId); }
+const hideError = tab => tab.error?.classList.remove('active');
+function find(next = true) { const view = active()?.view, query = $('find-input').value; if (view && query) view.findInPage(query, { forward: next, findNext: true }); }
+function zoom(delta) { const tab = active(); if (!tab) return; tab.zoom = delta === 0 ? 1 : Math.min(3, Math.max(.5, tab.zoom + delta)); tab.view.setZoomFactor(tab.zoom); toast(`Zoom ${Math.round(tab.zoom * 100)}%`); }
+function toast(message) { const el = $('toast'); el.textContent = message; el.classList.remove('hidden'); clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 2400); }
+const esc = value => String(value).replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
+function renderPanel(kind) { $('side-panel').classList.remove('hidden'); $('panel-title').textContent = kind === 'downloads' ? 'Downloads' : 'Settings'; $('panel-content').innerHTML = kind === 'downloads' ? (downloads.length ? downloads.map(d => `<article class="download"><strong>${esc(d.name)}</strong><small>${d.state === 'progressing' ? `${d.total ? Math.round(d.received / d.total * 100) : 0}%` : d.state}</small><div class="progress"><i style="width:${d.total ? Math.round(d.received / d.total * 100) : 0}%"></i></div>${d.state === 'completed' ? `<button data-id="${esc(d.id)}" data-open>Open</button><button data-id="${esc(d.id)}" data-folder class="quiet">Folder</button>` : d.state === 'progressing' ? `<button data-id="${esc(d.id)}" data-cancel class="quiet">Cancel</button>` : ''}</article>`).join('') : '<p class="empty">No downloads yet.</p>') : '<section class="settings"><p class="eyebrow">LOOTBROWSER</p><h2>Settings</h2><label>General <span>Sessions restore automatically</span></label><label>Appearance <span>Dark navy interface</span></label><label>Privacy <span>Cookies and site storage persist locally</span></label><label>Permissions <span>Ask before camera, microphone, location, or notifications</span></label><label>Downloads <span>Saved to your Downloads folder</span></label><label>Performance <span>Balanced mode uses minimal effects</span></label></section>';
+  document.querySelectorAll('[data-open],[data-folder],[data-cancel]').forEach(b => b.onclick = () => { if (b.hasAttribute('data-cancel')) return ipcRenderer.send('download-cancel', b.dataset.id); const d = downloads.find(x => x.id === b.dataset.id); if (d) ipcRenderer.invoke('download-action', { action: b.hasAttribute('data-folder') ? 'folder' : 'open', path: d.path }); });
 }
-
-function closeTab(id) {
-  const tabIndex = tabs.findIndex(t => t.id === id);
-  if (tabIndex === -1) return;
-
-  const tab = tabs[tabIndex];
-  tab.tabEl.remove();
-  tab.viewEl.remove();
-  tabs.splice(tabIndex, 1);
-
-  if (tabs.length === 0) {
-    createTab(); // Always keep at least one tab open
-  } else if (activeTabId === id) {
-    // Switch to the previous tab, or the next one if it was the first
-    const newActiveIndex = Math.max(0, tabIndex - 1);
-    switchTab(tabs[newActiveIndex].id);
-  }
-}
-
-function getActiveView() {
-  const tab = tabs.find(t => t.id === activeTabId);
-  return tab ? tab.viewEl : null;
-}
-
-function updateNavButtons(view) {
-  if (!view) return;
-  // Use try-catch because webview methods might not be ready immediately
-  try {
-    btnBack.disabled = !view.canGoBack();
-    btnForward.disabled = !view.canGoForward();
-  } catch(e) {}
-}
-
-// Navigation Controls
-btnBack.addEventListener('click', () => {
-  const view = getActiveView();
-  if (view && view.canGoBack()) view.goBack();
-});
-
-btnForward.addEventListener('click', () => {
-  const view = getActiveView();
-  if (view && view.canGoForward()) view.goForward();
-});
-
-btnReload.addEventListener('click', () => {
-  const view = getActiveView();
-  if (view) view.reload();
-});
-
-newTabBtn.addEventListener('click', () => createTab());
-
-// Address Bar Logic (Search vs URL)
-urlInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    let query = urlInput.value.trim();
-    if (!query) return;
-
-    // Basic regex to check if it's a domain/URL or a search query
-    const isUrl = /^(https?:\/\/)?([\w.-]+)\.([a-z]{2,})(:\d{1,5})?(\/.*)?$/i.test(query) || query.startsWith('localhost:');
-    
-    if (isUrl) {
-      if (!query.startsWith('http://') && !query.startsWith('https://')) {
-        query = 'https://' + query;
-      }
-    } else {
-      // Treat as a search query
-      query = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-    }
-
-    const view = getActiveView();
-    if (view) view.loadURL(query);
-    
-    urlInput.blur(); // Remove focus after pressing enter
-  }
-});
-
-// Initialize first tab
-createTab();
-
-//Dynamic Notification
-const { ipcRenderer } = require('electron');
-
-const updateBanner = document.getElementById('update-banner');
-const updateText = document.getElementById('update-text');
-const updateProgressFill = document.getElementById('update-progress-fill');
-const btnRestart = document.getElementById('btn-restart');
-
-ipcRenderer.on('update-status', (event, data) => {
-  if (data.type === 'available') {
-    updateBanner.classList.remove('hidden');
-    updateText.textContent = 'تم العثور على تحديث جديد، جاري بدء التنزيل...';
-  } else if (data.type === 'progress') {
-    updateBanner.classList.remove('hidden');
-    updateText.textContent = `جاري تنزيل التحديث: ${data.percent}%`;
-    updateProgressFill.style.width = `${data.percent}%`;
-  } else if (data.type === 'downloaded') {
-    updateBanner.classList.remove('hidden');
-    updateText.textContent = 'اكتمل التنزيل! المتصفح جاهز للتحديث.';
-    updateProgressFill.style.width = '100%';
-    btnRestart.classList.remove('hidden');
-  }
-});
-
-btnRestart.addEventListener('click', () => {
-  ipcRenderer.send('restart-and-install');
-});
+function positionMenu(menu, x, y) { menu.classList.remove('hidden'); const left = Math.max(8, Math.min(Math.round(x), innerWidth - menu.offsetWidth - 8)); const top = Math.max(96, Math.min(Math.round(y), innerHeight - menu.offsetHeight - 8)); menu.style.left = `${left}px`; menu.style.top = `${top}px`; }
+function showContext(data) { menuGuestId = data.guestId; const c = data.context, items = [{ label:'Back', action:'back', disabled:!c.canGoBack }, { label:'Forward', action:'forward', disabled:!c.canGoForward }, { label:'Reload', action:'reload' }, 'sep']; if (c.linkURL) items.push({ label:'Open link in new tab', action:'newtab' }, { label:'Open link in new window', action:'newwindow' }, { label:'Copy link', action:'copylink' }, 'sep'); items.push({ label:'Cut', action:'cut', disabled:!c.isEditable || !c.selectionText }, { label:'Copy', action:'copy', disabled:!c.selectionText }, { label:'Paste', action:'paste', disabled:!c.isEditable }, { label:'Select all', action:'selectall' }); if (c.selectionText) items.push('sep', { label:'Search selected text', action:'search' }); items.push('sep', { label:'Save page', action:'save' }, { label:'Inspect', action:'inspect' }); const menu = $('context-menu'); menu.innerHTML = items.map(i => i === 'sep' ? '<hr>' : `<button data-action="${i.action}" ${i.disabled ? 'disabled' : ''}>${i.label}</button>`).join(''); menu.querySelectorAll('button:not(:disabled)').forEach(b => b.onclick = () => { ipcRenderer.send('context-menu-action', { guestId: menuGuestId, action: b.dataset.action }); hideContext(); }); positionMenu(menu, data.x, data.y + 93); }
+function showAddressContext(event) { event.preventDefault(); const input = $('url-input'), hasSelection = input.selectionStart !== input.selectionEnd, menu = $('context-menu'); menu.innerHTML = `<button data-local="cut" ${hasSelection ? '' : 'disabled'}>Cut</button><button data-local="copy" ${hasSelection ? '' : 'disabled'}>Copy</button><button data-local="paste">Paste</button><button data-local="selectall">Select all</button>`; menu.querySelectorAll('button:not(:disabled)').forEach(button => button.onclick = () => { const action = button.dataset.local; if (action === 'copy') clipboard.writeText(input.value.slice(input.selectionStart, input.selectionEnd)); if (action === 'cut') { clipboard.writeText(input.value.slice(input.selectionStart, input.selectionEnd)); input.setRangeText('', input.selectionStart, input.selectionEnd, 'end'); } if (action === 'paste') input.setRangeText(clipboard.readText(), input.selectionStart, input.selectionEnd, 'end'); if (action === 'selectall') input.select(); input.focus(); hideContext(); }); positionMenu(menu, event.clientX, event.clientY); }function hideContext() { $('context-menu').classList.add('hidden'); }
+function hideFloating() { hideContext(); $('side-panel').classList.add('hidden'); }
+$('btn-back').onclick = () => { const v = active()?.view; if (v?.canGoBack()) v.goBack(); }; $('btn-forward').onclick = () => { const v = active()?.view; if (v?.canGoForward()) v.goForward(); }; $('btn-reload').onclick = () => active()?.view.reload(); $('btn-new-tab').onclick = () => createTab(); $('url-input').onkeydown = e => { if (e.key === 'Enter') { navigate(e.target.value); e.target.blur(); } };
+$('url-input').oncontextmenu = showAddressContext; $('find-input').oninput = () => find(true); $('find-next').onclick = () => find(true); $('find-prev').onclick = () => find(false); $('find-close').onclick = () => { active()?.view.stopFindInPage('clearSelection'); $('find-bar').classList.add('hidden'); }; $('btn-downloads').onclick = e => { e.stopPropagation(); renderPanel('downloads'); }; $('btn-settings').onclick = e => { e.stopPropagation(); renderPanel('settings'); }; $('panel-close').onclick = () => $('side-panel').classList.add('hidden'); document.addEventListener('mousedown', e => { if (!e.target.closest('#context-menu, #side-panel, #btn-downloads, #btn-settings')) hideFloating(); }); window.addEventListener('blur', hideFloating);
+ipcRenderer.on('open-url-in-tab', (e, url) => { if (url && url !== 'about:blank') createTab(url); }); ipcRenderer.on('context-menu', (e, data) => showContext(data)); ipcRenderer.on('browser-toast', (e, message) => toast(message));
+ipcRenderer.on('download-update', (e, update) => { const i = downloads.findIndex(d => d.id === update.id); i < 0 ? downloads.unshift(update) : downloads[i] = { ...downloads[i], ...update }; if (!$('side-panel').classList.contains('hidden') && $('panel-title').textContent === 'Downloads') renderPanel('downloads'); });
+ipcRenderer.on('permission-request', (e, request) => { pendingPermission = request; $('permission-title').textContent = `Allow ${request.permission}?`; try { $('permission-origin').textContent = new URL(request.origin).origin; } catch { $('permission-origin').textContent = request.origin; } $('permission-dialog').classList.remove('hidden'); }); for (const choice of ['allow','deny']) $(`permission-${choice}`).onclick = () => { if (pendingPermission) ipcRenderer.send('permission-response', { requestId: pendingPermission.requestId, allowed: choice === 'allow' }); pendingPermission = null; $('permission-dialog').classList.add('hidden'); };
+ipcRenderer.on('browser-shortcut', (e, key) => { const i = tabs.findIndex(t => t.id === activeId); if (key === 'ctrl-l') { $('url-input').focus(); $('url-input').select(); } else if (key === 'ctrl-t') createTab(); else if (key === 'ctrl-w') closeTab(activeId); else if (key === 'ctrl-shift-t') { const tab = closed.pop(); if (tab) createTab(tab.url, tab); } else if (key === 'ctrl-tab') switchTab(tabs[(i + 1) % tabs.length].id); else if (key === 'ctrl-shift-tab') switchTab(tabs[(i - 1 + tabs.length) % tabs.length].id); else if (key === 'ctrl-r') active()?.view.reload(); else if (key === 'ctrl-shift-r') active()?.view.reloadIgnoringCache(); else if (key === 'ctrl-f') { $('find-bar').classList.remove('hidden'); $('find-input').focus(); $('find-input').select(); } else if (key === 'ctrl-+' || key === 'ctrl-=') zoom(.1); else if (key === 'ctrl--') zoom(-.1); else if (key === 'ctrl-0') zoom(0); else if (key === 'alt-left') $('btn-back').click(); else if (key === 'alt-right') $('btn-forward').click(); else if (key === 'f11') ipcRenderer.send('toggle-fullscreen'); });
+ipcRenderer.on('update-status', (e, data) => { $('update-banner').classList.remove('hidden'); if (data.type === 'progress') $('update-progress-fill').style.width = `${data.percent}%`; if (data.type === 'downloaded') $('btn-restart').classList.remove('hidden'); }); $('btn-restart').onclick = () => ipcRenderer.send('restart-and-install'); window.onbeforeunload = saveSession;
+try { const saved = JSON.parse(localStorage.getItem(SESSION)) || JSON.parse(localStorage.getItem('lootbrowser.session.v1')); if (saved?.tabs?.length) { saved.tabs.forEach(tab => createTab(tab.url, tab)); switchTab(tabs[Math.max(0, Math.min(saved.active || 0, tabs.length - 1))].id); } else createTab(); } catch { createTab(); }
